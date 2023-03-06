@@ -8,8 +8,14 @@ doc = FreeCAD.newDocument()
 
 
 def endpoints(rect):
-    # 四个角点的坐标
-    point_1, point_2, point_3, point_4 = rect
+    if len(rect) == 2:
+        point_1 = (rect[0][0], rect[0][1])
+        point_2 = (rect[0][0], rect[1][1])
+        point_3 = (rect[1][0], rect[1][1])
+        point_4 = (rect[1][0], rect[0][1])
+    else:
+        # 四个角点的坐标
+        point_1, point_2, point_3, point_4 = rect
 
     # 计算每条边的长度
     side_1 = math.sqrt((point_2[0] - point_1[0]) ** 2 + (point_2[1] - point_1[1]) ** 2)
@@ -68,7 +74,7 @@ def assign_object_to_wall(object):
 
 
 def add_window(p1, p2, index):
-    width = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+    width = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2) * 0.8
     height = WALL_HEIGHT * 0.5
 
     placement = FreeCAD.Placement(
@@ -143,7 +149,7 @@ def add_door(p1, p2, index):
 
 
 def main():
-    file = r"/mnt/e/workspace/dataset/98_others/wu_json/F_836915.json"
+    file = r"/mnt/e/workspace/dataset/98_others/wu_json/F_839235.json"
 
     with open(file, "r") as f:
         data = json.load(f)
@@ -153,7 +159,7 @@ def main():
     cnt = 0
     lines = []
     for shape in shapes:
-        if shape["label"] != "wall":
+        if shape["label"] != "wall" and shape["label"] != "windows":
             continue
         rect = shape["points"]
         p1, p2 = endpoints(rect)
@@ -182,16 +188,16 @@ def main():
         cnt += 1
     doc.recompute()
 
-    print("=== add door ===")
-    cnt = 0
-    for shape in shapes:
-        if shape["label"] != "door":
-            continue
-        rect = shape["points"]
-        p1, p2 = endpoints(rect)
-        line = add_door(p1, p2, cnt)
-        cnt += 1
-    doc.recompute()
+    # print("=== add door ===")
+    # cnt = 0
+    # for shape in shapes:
+    #     if shape["label"] != "door":
+    #         continue
+    #     rect = shape["points"]
+    #     p1, p2 = endpoints(rect)
+    #     line = add_door(p1, p2, cnt)
+    #     cnt += 1
+    # doc.recompute()
 
     print("=== save ===")
     doc.saveAs(r"out.FCStd")
