@@ -1,8 +1,11 @@
-import FreeCAD, Draft, Arch, importOBJ
+import FreeCAD, Draft, Arch, Mesh
 import json, math
+import numpy as np
 
 WALL_HEIGHT = 200
-WALL_WIDTH = 10
+WALL_WIDTH = 20
+
+w, h = 0, 0
 
 doc = FreeCAD.newDocument()
 
@@ -34,19 +37,21 @@ def endpoints(rect):
     s1 = sides[0]
     s2 = sides[1]
 
-    return ((s1[0][0] + s1[1][0]) / 2, (s1[0][1] + s1[1][1]) / 2), (
+    return [(s1[0][0] + s1[1][0]) / 2, (s1[0][1] + s1[1][1]) / 2], [
         (s2[0][0] + s2[1][0]) / 2,
         (s2[0][1] + s2[1][1]) / 2,
-    )
+    ]
 
 
-def make_line(p1, p2, index):
+def add_wall(p1, p2, index):
     pa = FreeCAD.Vector(p1[0], p1[1], 0)
     pb = FreeCAD.Vector(p2[0], p2[1], 0)
     points = [pa, pb]
     line = Draft.makeWire(points, closed=False, face=False, support=None)
     line.Label = f"myline{index}"
-    return line
+    wall = Arch.makeWall(line, length=None, width=WALL_WIDTH, height=WALL_HEIGHT)
+    wall.Label = f"mywall{index}"
+    return wall
 
 
 def is_close(a, b, eps=1e-2):
@@ -54,12 +59,16 @@ def is_close(a, b, eps=1e-2):
 
 
 def angle_with_x_axis(p1, p2):
-    if is_close(p2[0], p1[0]):
-        return 90
-    slope = (p2[1] - p1[1]) / (p2[0] - p1[0])
-    angle_rad = math.atan(slope)
-    angle_deg = math.degrees(angle_rad)
-    return angle_deg
+    p1, p2 = np.array(p1), np.array(p2)
+    n1 = np.array([1, 0])
+    n2 = p2 - p1
+    angle = np.arccos(np.dot(n2, n1) / (np.linalg.norm(n2))) * 180 / np.pi
+    return angle
+
+
+def clockwise(p1, p2, p3):
+    p1, p2, p3 = np.array(p1), np.array(p2), np.array(p3)
+    return np.cross(p2 - p1, p3 - p1) < 0
 
 
 def assign_object_to_wall(object):
@@ -73,7 +82,7 @@ def assign_object_to_wall(object):
     object.Hosts = target
 
 
-def add_window(p1, p2, index):
+def add_window(p1, p2, index, wall=None):
     width = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2) * 0.8
     height = WALL_HEIGHT * 0.5
 
@@ -94,6 +103,7 @@ def add_window(p1, p2, index):
         o2=1,
         placement=placement,
     )
+    FreeCAD.ActiveDocument.recompute()
 
     angle = angle_with_x_axis(p1, p2)
 
@@ -104,15 +114,23 @@ def add_window(p1, p2, index):
             (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2, (WALL_HEIGHT - height) / 2
         ),
     )
-    assign_object_to_wall(window)
+
     window.HoleWire = 1
-    window.SymbolPlan = True
+    # window.SymbolPlan = True
     window.Label = f"mywindow{index}"
+    if wall is not None:
+        window.Hosts = wall
+
     return window
 
 
-def add_door(p1, p2, index):
-    width = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+def add_door(p1, p2, p3, index, wall=None):
+    """
+    p1: 圆心
+    p2: 靠墙点
+    p3: 远墙点
+    """
+    width = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2) * 0.8
     height = WALL_HEIGHT * 0.7
 
     placement = FreeCAD.Placement(
@@ -140,72 +158,133 @@ def add_door(p1, p2, index):
         door,
         FreeCAD.Vector((p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2, 0),
     )
-    assign_object_to_wall(door)
+
     door.HoleWire = 1
     door.SymbolPlan = True
+    door.Opening = 50
+    if wall is not None:
+        door.Hosts = wall
+
+    if clockwise(p1, p2, p3):
+        door = Draft.mirror(
+            door,
+            FreeCAD.Vector(p1[0], p1[1], 0),
+            FreeCAD.Vector(p2[0], p2[1], 0),
+        )
+
     door.Label = f"mydoor{index}"
-    door.Opening = 90
+
     return door
 
 
+def add_image(w, h):
+    rectangle1 = Draft.make_rectangle(w, h, face=True)
+    rectangle1.Label = "image"
+    doc.recompute()
+
+
+def transform(p):
+    p[1] = h - p[1]
+
+
+def fine_obj(w, h):
+    with open("image.obj", "r") as f:
+        lines = f.readlines()
+
+    output = []
+
+    # p = []
+    for line in lines:
+        if line.startswith("v "):
+            v = [float(i) for i in line.strip().split(" ")[1:]]
+            output.append(f"vt {v[0]//w} {v[1]//h} 0.0")
+
+        if line.startswith("f "):
+            tmp = []
+            for i in line.strip().split(" ")[1:]:
+                tmp2 = i.split("/")
+                tmp2[1] = tmp2[0]
+                tmp.append("/".join(tmp2))
+            output.append("f " + " ".join(tmp))
+        else:
+            output.append(line)
+
+    with open("image.obj", "w") as f:
+        f.write("mtllib out.mtl\n")
+        f.write("usemtl image\n")
+        for i in output:
+            f.write(i + "\n")
+
+
 def main():
-    file = r"/mnt/e/workspace/dataset/98_others/wu_json/F_839235.json"
+    global w, h
+    file = r"A_879715.json"
 
     with open(file, "r") as f:
         data = json.load(f)
     shapes = data["shapes"]
+    w, h = data["imageWidth"], data["imageHeight"]
 
     print("=== add wall ===")
     cnt = 0
-    lines = []
+
     for shape in shapes:
-        if shape["label"] != "wall" and shape["label"] != "windows":
+        if shape["label"] != "wall":
             continue
         rect = shape["points"]
         p1, p2 = endpoints(rect)
-        line = make_line(p1, p2, cnt)
-        lines.append(line)
+        transform(p1)
+        transform(p2)
+        add_wall(p1, p2, cnt)
         cnt += 1
-    Draft.join_wires(lines)
-    doc.recompute()
-
-    cnt = 0
-    for obj in doc.Objects:
-        if obj.Label.startswith("myline"):
-            obj = Arch.makeWall(obj, length=None, width=WALL_WIDTH, height=WALL_HEIGHT)
-            obj.Label = f"mywall{cnt}"
-            cnt += 1
     doc.recompute()
 
     print("=== add window ===")
-    cnt = 0
     for shape in shapes:
         if shape["label"] != "windows":
             continue
         rect = shape["points"]
         p1, p2 = endpoints(rect)
-        line = add_window(p1, p2, cnt)
+        transform(p1)
+        transform(p2)
+        wall = add_wall(p1, p2, cnt)
+        add_window(p1, p2, cnt, wall)
         cnt += 1
     doc.recompute()
 
-    # print("=== add door ===")
-    # cnt = 0
-    # for shape in shapes:
-    #     if shape["label"] != "door":
-    #         continue
-    #     rect = shape["points"]
-    #     p1, p2 = endpoints(rect)
-    #     line = add_door(p1, p2, cnt)
-    #     cnt += 1
-    # doc.recompute()
+    print("=== add door ===")
+    for shape in shapes:
+        if shape["label"] != "curve_door":
+            continue
+        doorPts = shape["points"]
+        p1, p2, p3, p4 = doorPts
+        transform(p1)
+        transform(p3)
+        transform(p4)
+        wall = add_wall(p3, p4, cnt)
+        add_door(p4, p3, p1, cnt, wall)
+        cnt += 1
+    doc.recompute()
+
+    add_image(w, h)
 
     print("=== save ===")
     doc.saveAs(r"out.FCStd")
     objs = []
     for obj in doc.Objects:
-        if obj.Label.startswith("mywall"):
+        if obj.Label.startswith("mywall") or obj.Label.startswith("mydoor"):
             objs.append(obj)
-    importOBJ.export(objs, r"out.obj")
+
+    Mesh.export(objs, r"roomplan.obj")
+
+    objs = []
+    for obj in doc.Objects:
+        if obj.Label.startswith("image"):
+            objs.append(obj)
+
+    Mesh.export(objs, r"image.obj")
+
+    fine_obj(w, h)
 
 
 main()
