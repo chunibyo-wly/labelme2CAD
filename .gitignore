@@ -1,3 +1,4 @@
 *.obj
 *.FCS*
 __pycache__
+out.png

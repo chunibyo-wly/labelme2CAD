@@ -1,6 +1,8 @@
 import FreeCAD, Draft, Arch, Mesh
 import json, math
 import numpy as np
+from os.path import join, basename, dirname
+import shutil
 
 WALL_HEIGHT = 200
 WALL_WIDTH = 20
@@ -216,13 +218,24 @@ def fine_obj(w, h):
             f.write(i + "\n")
 
 
+def saveObj(label, file_name):
+    objs = []
+    for obj in doc.Objects:
+        if obj.Label.startswith(label):
+            objs.append(obj)
+    Mesh.export(objs, file_name)
+
+
 def main():
     global w, h
-    file = r"A_879715.json"
+    file = r"/mnt/e/workspace/dataset/98_others/json/F_839233.json"
 
     with open(file, "r") as f:
         data = json.load(f)
     shapes = data["shapes"]
+    image_path = join(dirname(file), data["imagePath"])
+    shutil.copy(image_path, "./out.png")
+
     w, h = data["imageWidth"], data["imageHeight"]
 
     print("=== add wall ===")
@@ -252,37 +265,27 @@ def main():
         cnt += 1
     doc.recompute()
 
-    print("=== add door ===")
-    for shape in shapes:
-        if shape["label"] != "curve_door":
-            continue
-        doorPts = shape["points"]
-        p1, p2, p3, p4 = doorPts
-        transform(p1)
-        transform(p3)
-        transform(p4)
-        wall = add_wall(p3, p4, cnt)
-        add_door(p4, p3, p1, cnt, wall)
-        cnt += 1
-    doc.recompute()
+    # print("=== add door ===")
+    # for shape in shapes:
+    #     if shape["label"] != "curve_door":
+    #         continue
+    #     doorPts = shape["points"]
+    #     p1, p2, p3, p4 = doorPts
+    #     transform(p1)
+    #     transform(p3)
+    #     transform(p4)
+    #     wall = add_wall(p3, p4, cnt)
+    #     add_door(p4, p3, p1, cnt, wall)
+    #     cnt += 1
+    # doc.recompute()
 
     add_image(w, h)
 
     print("=== save ===")
-    doc.saveAs(r"out.FCStd")
-    objs = []
-    for obj in doc.Objects:
-        if obj.Label.startswith("mywall") or obj.Label.startswith("mydoor"):
-            objs.append(obj)
-
-    Mesh.export(objs, r"roomplan.obj")
-
-    objs = []
-    for obj in doc.Objects:
-        if obj.Label.startswith("image"):
-            objs.append(obj)
-
-    Mesh.export(objs, r"image.obj")
+    saveObj("mywall", "wall.obj")
+    saveObj("mydoor", "door.obj")
+    saveObj("image", "image.obj")
+    saveObj("mywindow", "window.obj")
 
     fine_obj(w, h)
 
